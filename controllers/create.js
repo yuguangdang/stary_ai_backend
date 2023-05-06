@@ -305,9 +305,9 @@ const createVideo = async (
       })
       .on("end", function (output) {
         console.log("Video created in:", output);
-        // deleteFiles(audioFiles);
-        // deleteFiles(imagePaths);
-        // deleteFiles(["./tmp/mergedAudio.mp3"]);
+        deleteFiles(audioFiles);
+        deleteFiles(imagePaths);
+        deleteFiles(["./tmp/mergedAudio.mp3"]);
         resolve(outputFile);
       });
   });
