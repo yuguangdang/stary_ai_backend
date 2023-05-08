@@ -4,6 +4,8 @@ const ffmpeg = require("fluent-ffmpeg");
 const axios = require("axios");
 const FakeYou = require("fakeyou.js");
 const fs = require("fs");
+const AWS = require("aws-sdk");
+const crypto = require("crypto");
 
 // Start openai API
 const configuration = new Configuration({
@@ -16,6 +18,8 @@ const fy = new FakeYou.Client({
   password: process.env.FAKEYOU_PASSWORD,
 });
 fy.start();
+// Start SWS S3
+const s3 = new AWS.S3();
 
 exports.createStory = async (req, res, next) => {
   const subject = req.body.prompt;
@@ -122,8 +126,52 @@ exports.createMovie = async (req, res, next) => {
       mergedAudioFile,
       audioFiles
     );
+
+    // Upload the video file to S3
+    const bucketName = "staryai";
+    const randomString = crypto.randomBytes(8).toString("hex");
+    ("AI generated story about tiger narrated by a fake voice of Emma Watson - 2023-05-07T07:18:16.230Z.mp4");
+    const fileContent = fs.readFileSync(videoFile);
+    const params = {
+      Bucket: bucketName,
+      Key: randomString,
+      Body: fileContent,
+    };
+    const region = "ap-southeast-2";
+    const url = `https://${bucketName}.s3.${region}.amazonaws.com/${randomString}`;
+    await s3.putObject(params).promise();
+    console.log(`Video uploaded to S3 bucket: ${bucketName}/${videoFile}`);
+    res.status(200).json({
+      message: `Video uploaded to S3 bucket: ${url}`,
+      url: url,
+    });
   } catch (error) {
     // If there's an error with the request, send an error response with a message
+    console.error(error);
+    res.status(400).json({ error: "Bad request" });
+  }
+};
+
+exports.getVieoUrls = async (req, res, next) => {
+  const bucketName = "staryai"
+  const region = "ap-southeast-2";
+
+  try {
+    const response = await s3
+      .listObjectsV2({
+        Bucket: bucketName,
+      })
+      .promise();
+
+    const urls = response.Contents.map((item) => {
+      return `https://${bucketName}.s3.${region}.amazonaws.com/${item.Key}`;
+    });
+
+    res.status(200).json({
+      message: `Video urls fetched successfully.`,
+      urls: urls,
+    });
+  } catch (error) {
     console.error(error);
     res.status(400).json({ error: "Bad request" });
   }
@@ -132,7 +180,7 @@ exports.createMovie = async (req, res, next) => {
 const generatePrompt = (animal) => {
   const capitalizedAnimal =
     animal[0].toUpperCase() + animal.slice(1).toLowerCase();
-  return `Make a story about ${capitalizedAnimal} that is more than 500 words`;
+  return `Make a story about ${capitalizedAnimal}.`;
 };
 
 const createImage = async (prompt, style) => {
@@ -173,7 +221,7 @@ const downloadAudio = async (story, voice) => {
     const model = await fy.models.fetch(voice);
 
     for (let i = 0; i < story.length; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       console.log(`Creating voiceover audio for story ${i + 1} ...`);
       console.log(story[i]);
@@ -285,10 +333,7 @@ const createVideo = async (
     end: totalDuration,
   };
 
-  const now = new Date();
-  const outputFile = `./tmp/AI generated story about ${prompt} narrated by a fake voice of ${
-    narrator.name
-  } - ${now.toISOString()}.mp4`;
+  const outputFile = `./tmp/${prompt}_${narrator.name}.mp4`;
 
   return new Promise((resolve, reject) => {
     // Create the final video
