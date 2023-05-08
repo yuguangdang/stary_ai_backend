@@ -124,7 +124,6 @@ exports.createMovie = async (req, res, next) => {
       totalDuration,
       narrator,
       mergedAudioFile,
-      audioFiles
     );
 
     // Upload the video file to S3
@@ -140,6 +139,12 @@ exports.createMovie = async (req, res, next) => {
     const region = "ap-southeast-2";
     const url = `https://${bucketName}.s3.${region}.amazonaws.com/${randomString}`;
     await s3.putObject(params).promise();
+
+    deleteFiles(audioFiles);
+    deleteFiles(imagePaths);
+    deleteFiles([mergedAudioFile]);
+    deleteFiles([videoFile]);
+
     console.log(`Video uploaded to S3 bucket: ${bucketName}/${videoFile}`);
     res.status(200).json({
       message: `Video uploaded to S3 bucket: ${url}`,
@@ -153,7 +158,7 @@ exports.createMovie = async (req, res, next) => {
 };
 
 exports.getVieoUrls = async (req, res, next) => {
-  const bucketName = "staryai"
+  const bucketName = "staryai";
   const region = "ap-southeast-2";
 
   try {
@@ -312,7 +317,6 @@ const createVideo = async (
   totalDuration,
   narrator,
   mergedAudioFile,
-  audioFiles
 ) => {
   // Create fames for showvideo()
   const frames = imagePaths.map((imagePath, index) => {
@@ -350,9 +354,6 @@ const createVideo = async (
       })
       .on("end", function (output) {
         console.log("Video created in:", output);
-        deleteFiles(audioFiles);
-        deleteFiles(imagePaths);
-        deleteFiles(["./tmp/mergedAudio.mp3"]);
         resolve(outputFile);
       });
   });
