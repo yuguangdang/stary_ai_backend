@@ -103,7 +103,7 @@ exports.createMovie = async (req, res, next) => {
     console.log("Start downloading images ...");
     const imagePaths = await Promise.all(
       images.map(async (imageUrl, i) => {
-        const imagePath = `./tmp/image${i + 1}-${new Date().toISOString()}.jpg`;
+        const imagePath = `/tmp/image${i + 1}-${new Date().toISOString()}.jpg`;
         await downloadImage(imageUrl, imagePath);
         return imagePath;
       })
@@ -125,7 +125,6 @@ exports.createMovie = async (req, res, next) => {
       narrator,
       mergedAudioFile,
     );
-
     // Upload the video file to S3
     const bucketName = "staryai";
     const randomString = crypto.randomBytes(8).toString("hex");
@@ -139,7 +138,7 @@ exports.createMovie = async (req, res, next) => {
     const region = "ap-southeast-2";
     const url = `https://${bucketName}.s3.${region}.amazonaws.com/${randomString}`;
     await s3.putObject(params).promise();
-
+    // Delte all files in the tmp folder
     deleteFiles(audioFiles);
     deleteFiles(imagePaths);
     deleteFiles([mergedAudioFile]);
@@ -157,7 +156,7 @@ exports.createMovie = async (req, res, next) => {
   }
 };
 
-exports.getVieoUrls = async (req, res, next) => {
+exports.getVideoUrls = async (req, res, next) => {
   const bucketName = "staryai";
   const region = "ap-southeast-2";
 
@@ -235,7 +234,7 @@ const downloadAudio = async (story, voice) => {
       console.log(audioUrl);
 
       // Save audioUrl to file
-      const audioPath = `./tmp/audio${i + 1}-${new Date().toISOString()}.mp3`;
+      const audioPath = `/tmp/audio${i + 1}-${new Date().toISOString()}.mp3`;
       const audioFile = fs.createWriteStream(audioPath);
       const audioResponse = await axios.get(audioUrl, {
         responseType: "stream",
@@ -269,7 +268,7 @@ const downloadAudio = async (story, voice) => {
 };
 
 const mergeAudioFiles = (audioFiles) => {
-  const outputFile = "./tmp/mergedAudio.mp3";
+  const outputFile = "/tmp/mergedAudio.mp3";
   const command = ffmpeg();
 
   for (const audioFile of audioFiles) {
@@ -337,7 +336,7 @@ const createVideo = async (
     end: totalDuration,
   };
 
-  const outputFile = `./tmp/${prompt}_${narrator.name}.mp4`;
+  const outputFile = `/tmp/${prompt}_${narrator.name}.mp4`;
 
   return new Promise((resolve, reject) => {
     // Create the final video
