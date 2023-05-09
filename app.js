@@ -1,23 +1,19 @@
 require("dotenv").config();
 
+const cors = require('cors');
 const express = require("express");
 const bodyParser = require("body-parser");
 
 const createRoute = require("./routes/create");
 
 const app = express();
+
+const corsOptions = {
+  origin: ['http://localhost:3000', 'https://example.com'],
+};
+app.use(cors(corsOptions));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, PATCH, DELETE"
-  );
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  next();
-});
 
 app.use("/create", createRoute);
 
