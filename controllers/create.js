@@ -149,10 +149,11 @@ exports.createMovie = async (req, res, next) => {
       message: `Video uploaded to S3 bucket: ${url}`,
       url: url,
     });
+    console.log("The end of create video function, everything was fine.");
   } catch (error) {
     // If there's an error with the request, send an error response with a message
     console.error(error);
-    res.status(400).json({ error: "Bad request" });
+    res.status(400).json({ error: "Could not create a video from the server." });
   }
 };
 
