@@ -6,6 +6,7 @@ const FakeYou = require("fakeyou.js");
 const fs = require("fs");
 const AWS = require("aws-sdk");
 const crypto = require("crypto");
+const Bottleneck = require("bottleneck");
 
 // Start openai API
 const configuration = new Configuration({
@@ -16,6 +17,11 @@ const openai = new OpenAIApi(configuration);
 const fy = new FakeYou.Client({
   usernameOrEmail: "yuguangdang123@gmail.com",
   password: process.env.FAKEYOU_PASSWORD,
+});
+// Set up the Bottleneck limiter for FakeYou API
+const limiter = new Bottleneck({
+  maxConcurrent: 1,
+  minTime: (2 * 1000) / 3, // Allow 3 requests per 2 seconds
 });
 fy.start();
 // Start SWS S3
@@ -123,7 +129,7 @@ exports.createMovie = async (req, res, next) => {
       durations,
       totalDuration,
       narrator,
-      mergedAudioFile,
+      mergedAudioFile
     );
     // Upload the video file to S3
     const bucketName = "staryai";
@@ -153,7 +159,9 @@ exports.createMovie = async (req, res, next) => {
   } catch (error) {
     // If there's an error with the request, send an error response with a message
     console.error(error);
-    res.status(400).json({ error: "Could not create a video from the server." });
+    res
+      .status(400)
+      .json({ error: "Could not create a video from the server." });
   }
 };
 
@@ -225,17 +233,17 @@ const downloadAudio = async (story, voice) => {
   try {
     const model = await fy.models.fetch(voice);
 
-    for (let i = 0; i < story.length; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      console.log(`Creating voiceover audio for story ${i + 1} ...`);
-      console.log(story[i]);
-      const response = await model.request(story[i]);
+    const processStoryPart = async (part, index) => {
+      console.log(`Creating voiceover audio for story ${index + 1} ...`);
+      console.log(part);
+      const response = await limiter.schedule(() => model.request(part));
       const audioUrl = publicPath + response.audioPath;
       console.log(audioUrl);
 
       // Save audioUrl to file
-      const audioPath = `/tmp/audio${i + 1}-${new Date().toISOString()}.mp3`;
+      const audioPath = `/tmp/audio${
+        index + 1
+      }-${new Date().toISOString()}.mp3`;
       const audioFile = fs.createWriteStream(audioPath);
       const audioResponse = await axios.get(audioUrl, {
         responseType: "stream",
@@ -251,10 +259,18 @@ const downloadAudio = async (story, voice) => {
             reject(err);
           });
       });
-      audioFiles.push(audioPath);
       console.log(`Voiceover audio saved to: ${audioPath}`);
-    }
-    console.log("All audio files have been succesfully downloaded.");
+      return audioPath;
+    };
+
+    const audioPathsPromises = story.map((part, index) =>
+      processStoryPart(part, index)
+    );
+
+    const audioPaths = await Promise.all(audioPathsPromises);
+    audioFiles.push(...audioPaths);
+
+    console.log("All audio files have been successfully downloaded.");
 
     const durations = await getAudioDurations(audioFiles);
     console.log(durations);
@@ -316,7 +332,7 @@ const createVideo = async (
   durations,
   totalDuration,
   narrator,
-  mergedAudioFile,
+  mergedAudioFile
 ) => {
   // Create fames for showvideo()
   const frames = imagePaths.map((imagePath, index) => {
