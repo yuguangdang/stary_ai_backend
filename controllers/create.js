@@ -15,7 +15,7 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 // Start FAKEYOU API
 const fy = new FakeYou.Client({
-  usernameOrEmail: "yuguangdang123@gmail.com",
+  usernameOrEmail: process.env.FY_USERNAME,
   password: process.env.FAKEYOU_PASSWORD,
 });
 // Set up the Bottleneck limiter for FakeYou API
@@ -26,6 +26,13 @@ const limiter = new Bottleneck({
 fy.start();
 // Start SWS S3
 const s3 = new AWS.S3();
+const bucketName = process.env.S3_BUCKET_NAME;
+const region = process.env.AWS_REGION;
+// Create a DynamoDB instance
+AWS.config.update({ region: region });
+const dynamoDB = new AWS.DynamoDB.DocumentClient();
+// Initiate process status
+let processingRequests = {};
 
 exports.createStory = async (req, res, next) => {
   const subject = req.body.prompt;
@@ -50,7 +57,6 @@ exports.createStory = async (req, res, next) => {
     console.log("A story successfully created.");
     res.status(200).json({ result: completion.data.choices[0].text });
   } catch (error) {
-    // Consider adjusting the error handling logic for your use case
     if (error.response) {
       console.error(error.response.status, error.response.data);
       res.status(error.response.status).json(error.response.data);
@@ -58,7 +64,7 @@ exports.createStory = async (req, res, next) => {
       console.error(`Error with OpenAI API request: ${error.message}`);
       res.status(500).json({
         error: {
-          message: "An error occurred during your request.",
+          message: "An error occurred during requesting to openai.",
         },
       });
     }
@@ -93,7 +99,7 @@ exports.createImages = async (req, res, next) => {
       console.error(`Error with OpenAI API request: ${error.message}`);
       res.status(500).json({
         error: {
-          message: "An error occurred during your request.",
+          message: "An error occurred during requesting to openai.",
         },
       });
     }
@@ -103,25 +109,28 @@ exports.createImages = async (req, res, next) => {
 exports.createMovie = async (req, res, next) => {
   const { prompt, story, images, narrator } = req.body;
   const updatedStory = story.map((str) => `,${str}`);
+  const requestId = crypto.randomBytes(8).toString("hex");
+  // Save the request's initial status
+  processingRequests[requestId] = { status: "processing", progress: 5 };
+
+  res.status(200).json({ requestId: requestId });
 
   try {
-    // Downloading all the images
-    console.log("Start downloading images ...");
-    const imagePaths = await Promise.all(
-      images.map(async (imageUrl, i) => {
-        const imagePath = `/tmp/image${i + 1}-${new Date().toISOString()}.jpg`;
-        await downloadImage(imageUrl, imagePath);
-        return imagePath;
-      })
-    );
-    console.log("Images downloaded successfully.");
+    // Downloading images to tmp and upload them to S3 bucket.
+    const { imagePaths, imageUrls } = await downloadAndUploadImages(images);
+    processingRequests[requestId] = { status: "processing", progress: 10 };
     // Downloading audio files, get each audio duration and merge all audio files
     const { mergedAudioFile, durations, audioFiles } = await downloadAudio(
       updatedStory,
-      narrator.id
+      narrator.id,
+      requestId
     );
+    processingRequests[requestId] = { status: "processing", progress: 90 };
+
     // Calculate the total duration for the logo
     const totalDuration = durations.reduce((acc, val) => acc + val, 0);
+    processingRequests[requestId] = { status: "processing", progress: 95 };
+
     // Create the video
     const videoFile = await createVideo(
       prompt,
@@ -131,62 +140,89 @@ exports.createMovie = async (req, res, next) => {
       narrator,
       mergedAudioFile
     );
+    // processingRequests[requestId] = { status: "processing", progress: 99 };
+
     // Upload the video file to S3
-    const bucketName = "staryai";
     const randomString = crypto.randomBytes(8).toString("hex");
-    ("AI generated story about tiger narrated by a fake voice of Emma Watson - 2023-05-07T07:18:16.230Z.mp4");
     const fileContent = fs.readFileSync(videoFile);
     const params = {
       Bucket: bucketName,
       Key: randomString,
       Body: fileContent,
     };
-    const region = "ap-southeast-2";
     const url = `https://${bucketName}.s3.${region}.amazonaws.com/${randomString}`;
     await s3.putObject(params).promise();
-    // Delte all files in the tmp folder
+
+    // Update the final status and video url
+    processingRequests[requestId] = {
+      status: "finished",
+      progress: 100,
+      url: url,
+    };
+
+    // Store video name and S3 URL into DynamoDB
+    const videoName = `${
+      prompt.charAt(0).toUpperCase() + prompt.slice(1).toLowerCase()
+    } narrated by ${narrator.name}`;
+    const dbParams = {
+      TableName: "staryai",
+      Item: {
+        videoId: randomString,
+        videoName: videoName,
+        S3Url: url,
+        imageUrls: imageUrls,
+        story: story,
+      },
+    };
+    try {
+      await dynamoDB.put(dbParams).promise();
+      console.log(`${videoName} is added into db successfully.`);
+    } catch (error) {
+      console.error(`Error storing data to DynamoDB: ${error}`);
+      throw error;
+    }
+
+    // Delete all files in the tmp folder
     deleteFiles(audioFiles);
     deleteFiles(imagePaths);
     deleteFiles([mergedAudioFile]);
     deleteFiles([videoFile]);
 
     console.log(`Video uploaded to S3 bucket: ${bucketName}/${videoFile}`);
-    res.status(200).json({
-      message: `Video uploaded to S3 bucket: ${url}`,
-      url: url,
-    });
-    console.log("The end of create video function, everything was fine.");
+    // Update the status to 'finished'
   } catch (error) {
-    // If there's an error with the request, send an error response with a message
     console.error(error);
-    res
-      .status(400)
-      .json({ error: "Could not create a video from the server." });
+    processingRequests[requestId].status = "error";
+    processingRequests[requestId].errorMessage = error.message;
   }
 };
 
-exports.getVideoUrls = async (req, res, next) => {
-  const bucketName = "staryai";
-  const region = "ap-southeast-2";
+exports.getCreateMovieStatus = async (req, res) => {
+  const { requestId } = req.query;
+
+  if (!requestId || !processingRequests[requestId]) {
+    return res.status(404).json({ error: "Request not found" });
+  }
+
+  const requestStatus = processingRequests[requestId];
+  if (requestStatus.status === "finished" || requestStatus.status === "error") {
+    delete processingRequests[requestId];
+  }
+
+  res.status(200).json(requestStatus);
+};
+
+exports.getVideos = async (req, res, next) => {
+  const params = {
+    TableName: "staryai",
+  };
 
   try {
-    const response = await s3
-      .listObjectsV2({
-        Bucket: bucketName,
-      })
-      .promise();
-
-    const urls = response.Contents.map((item) => {
-      return `https://${bucketName}.s3.${region}.amazonaws.com/${item.Key}`;
-    });
-
-    res.status(200).json({
-      message: `Video urls fetched successfully.`,
-      urls: urls,
-    });
+    const data = await dynamoDB.scan(params).promise();
+    res.status(200).json(data.Items);
   } catch (error) {
-    console.error(error);
-    res.status(400).json({ error: "Bad request" });
+    console.error(`Error retrieving data from DynamoDB: ${error}`);
+    res.status(500).json({ error: "Error retrieving data from DynamoDB" });
   }
 };
 
@@ -209,24 +245,60 @@ const createImage = async (prompt, style) => {
   }
 };
 
-const downloadImage = async (url, path) => {
-  const writer = fs.createWriteStream(path);
+const downloadAndUploadImages = async (images) => {
+  try {
+    const imageDetails = await Promise.all(
+      images.map(async (imageUrl, i) => {
+        // Define the local image path and S3 key
+        const imagePath = `/tmp/image${i + 1}-${new Date().toISOString()}.jpg`;
+        const imageKey = `image${i + 1}-${new Date().toISOString()}.jpg`;
 
-  const response = await axios({
-    url,
-    method: "GET",
-    responseType: "stream",
-  });
+        // Download the image and save it locally
+        const response = await axios({
+          url: imageUrl,
+          method: "GET",
+          responseType: "stream",
+        });
+        const writer = fs.createWriteStream(imagePath);
+        response.data.pipe(writer);
+        await new Promise((resolve, reject) => {
+          writer.on("finish", resolve);
+          writer.on("error", reject);
+        });
 
-  response.data.pipe(writer);
+        // Upload the image to S3
+        const fileContent = fs.createReadStream(imagePath);
 
-  return new Promise((resolve, reject) => {
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-  });
+        const uploadParams = {
+          Bucket: bucketName,
+          Key: imageKey,
+          Body: fileContent,
+        };
+        await s3.upload(uploadParams).promise();
+
+        // Create the S3 URL of the image
+        const s3Url = `https://${bucketName}.s3.${region}.amazonaws.com/${imageKey}`;
+
+        // Return the local path and S3 URL
+        return { path: imagePath, url: s3Url };
+      })
+    );
+
+    const imagePaths = imageDetails.map((detail) => detail.path);
+    const imageUrls = imageDetails.map((detail) => detail.url);
+
+    console.log("Images downloaded and uploaded to S3 successfully.");
+    return { imagePaths, imageUrls };
+  } catch (error) {
+    console.error(
+      "Error occurred while downloading and uploading images:",
+      error
+    );
+    throw error;
+  }
 };
 
-const downloadAudio = async (story, voice) => {
+const downloadAudio = async (story, voice, requestId) => {
   const publicPath = "https://storage.googleapis.com/vocodes-public";
   const audioFiles = [];
 
@@ -235,7 +307,6 @@ const downloadAudio = async (story, voice) => {
 
     const processStoryPart = async (part, index) => {
       console.log(`Creating voiceover audio for story ${index + 1} ...`);
-      console.log(part);
       const response = await limiter.schedule(() => model.request(part));
       const audioUrl = publicPath + response.audioPath;
       console.log(audioUrl);
@@ -260,6 +331,13 @@ const downloadAudio = async (story, voice) => {
           });
       });
       console.log(`Voiceover audio saved to: ${audioPath}`);
+
+      // Update the status after each file is downloaded
+      processingRequests[requestId].status = "processing";
+      processingRequests[requestId].progress = Math.round(
+        ((index + 1) / (story.length + 1)) * 100
+      );
+
       return audioPath;
     };
 
@@ -280,6 +358,9 @@ const downloadAudio = async (story, voice) => {
     return { mergedAudioFile, durations, audioFiles };
   } catch (error) {
     console.error(error);
+    // Update status to error if something goes wrong
+    processingRequests[requestId].status = "error";
+    processingRequests[requestId].error = error.message;
     throw error;
   }
 };

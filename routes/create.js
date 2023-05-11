@@ -6,6 +6,7 @@ const createController = require("../controllers/create");
 router.post("/create-story", createController.createStory);
 router.post("/create-images", createController.createImages);
 router.post("/create-movie", createController.createMovie);
-router.get("/get-video-urls", createController.getVideoUrls);
+router.get("/get-create-movie-status", createController.getCreateMovieStatus);
+router.get("/get-videos", createController.getVideos);
 
 module.exports = router;
