@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-const cors = require('cors');
+const cors = require("cors");
 const express = require("express");
 const bodyParser = require("body-parser");
 
@@ -9,7 +9,10 @@ const createRoute = require("./routes/create");
 const app = express();
 
 const corsOptions = {
-  origin: ['http://localhost:3000', 'https://example.com'],
+  origin: [
+    "http://localhost:3000",
+    "https://http://stary-ai.s3-website-ap-southeast-2.amazonaws.com/",
+  ],
 };
 app.use(cors(corsOptions));
 app.use(bodyParser.urlencoded({ extended: false }));
