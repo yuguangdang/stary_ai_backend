@@ -11,7 +11,7 @@ const app = express();
 const corsOptions = {
   origin: [
     "http://localhost:3000",
-    "https://http://stary-ai.s3-website-ap-southeast-2.amazonaws.com/",
+    "https://http://stary-ai.s3-website-ap-southeast-2.amazonaws.com",
   ],
 };
 app.use(cors(corsOptions));
