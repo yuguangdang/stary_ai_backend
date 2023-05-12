@@ -125,11 +125,10 @@ exports.createMovie = async (req, res, next) => {
       narrator.id,
       requestId
     );
-    processingRequests[requestId] = { status: "processing", progress: 90 };
+    processingRequests[requestId] = { status: "processing", progress: 85 };
 
     // Calculate the total duration for the logo
     const totalDuration = durations.reduce((acc, val) => acc + val, 0);
-    processingRequests[requestId] = { status: "processing", progress: 95 };
 
     // Create the video
     const videoFile = await createVideo(
@@ -140,17 +139,18 @@ exports.createMovie = async (req, res, next) => {
       narrator,
       mergedAudioFile
     );
-    // processingRequests[requestId] = { status: "processing", progress: 99 };
+    processingRequests[requestId] = { status: "processing", progress: 95 };
 
     // Upload the video file to S3
-    const randomString = crypto.randomBytes(8).toString("hex");
+    const videoFileName = crypto.randomBytes(8).toString("hex") + ".mp4";
     const fileContent = fs.readFileSync(videoFile);
     const params = {
       Bucket: bucketName,
-      Key: randomString,
+      Key: videoFileName,
       Body: fileContent,
+      ContentType: "video/mp4",
     };
-    const url = `https://${bucketName}.s3.${region}.amazonaws.com/${randomString}`;
+    const url = `https://${bucketName}.s3.${region}.amazonaws.com/${videoFileName}`;
     await s3.putObject(params).promise();
 
     // Update the final status and video url
@@ -167,7 +167,7 @@ exports.createMovie = async (req, res, next) => {
     const dbParams = {
       TableName: "staryai",
       Item: {
-        videoId: randomString,
+        videoId: videoFileName,
         videoName: videoName,
         S3Url: url,
         imageUrls: imageUrls,
@@ -226,6 +226,28 @@ exports.getVideos = async (req, res, next) => {
   }
 };
 
+exports.getVideo = async (req, res, next) => {
+  const { videoId } = req.query;
+  console.log(videoId)
+  try {
+    const params = {
+      TableName: "staryai",
+      Key: { videoId: videoId },
+    };
+
+    const data = await dynamoDB.get(params).promise();
+
+    if (data.Item) {
+      res.json(data.Item);
+    } else {
+      res.status(404).send("Video not found");
+    }
+  } catch (error) {
+    console.error("Error in get video:", error);
+    res.status(500).send("An error occurred while retrieving the video");
+  }
+};
+
 const generatePrompt = (animal) => {
   const capitalizedAnimal =
     animal[0].toUpperCase() + animal.slice(1).toLowerCase();
@@ -273,6 +295,8 @@ const downloadAndUploadImages = async (images) => {
           Bucket: bucketName,
           Key: imageKey,
           Body: fileContent,
+          ContentType: "image/jpeg",
+          ContentDisposition: "inline",
         };
         await s3.upload(uploadParams).promise();
 

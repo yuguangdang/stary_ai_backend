@@ -8,5 +8,6 @@ router.post("/create-images", createController.createImages);
 router.post("/create-movie", createController.createMovie);
 router.get("/get-create-movie-status", createController.getCreateMovieStatus);
 router.get("/get-videos", createController.getVideos);
+router.get("/get-video", createController.getVideo);
 
 module.exports = router;
