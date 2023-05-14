@@ -127,19 +127,15 @@ exports.createMovie = async (req, res, next) => {
     );
     processingRequests[requestId] = { status: "processing", progress: 85 };
 
-    // Calculate the total duration for the logo
-    const totalDuration = durations.reduce((acc, val) => acc + val, 0);
-
     // Create the video
     const videoFile = await createVideo(
       prompt,
       imagePaths,
       durations,
-      totalDuration,
       narrator,
-      mergedAudioFile
+      mergedAudioFile,
+      requestId
     );
-    processingRequests[requestId] = { status: "processing", progress: 95 };
 
     // Upload the video file to S3
     const videoFileName = crypto.randomBytes(8).toString("hex") + ".mp4";
@@ -228,7 +224,7 @@ exports.getVideos = async (req, res, next) => {
 
 exports.getVideo = async (req, res, next) => {
   const { videoId } = req.query;
-  console.log(videoId)
+  console.log(videoId);
   try {
     const params = {
       TableName: "staryai",
@@ -435,9 +431,9 @@ const createVideo = async (
   prompt,
   imagePaths,
   durations,
-  totalDuration,
   narrator,
-  mergedAudioFile
+  mergedAudioFile,
+  requestId
 ) => {
   // Create fames for showvideo()
   const frames = imagePaths.map((imagePath, index) => {
@@ -453,20 +449,15 @@ const createVideo = async (
     delay: 0.1, // seconds
   };
 
-  var logoParams = {
-    start: 0.1,
-    end: totalDuration,
-  };
-
   const outputFile = `/tmp/${prompt}_${narrator.name}.mp4`;
 
   return new Promise((resolve, reject) => {
     // Create the final video
     videoshow(frames, videoOptions)
       .audio(mergedAudioFile, audioParams)
-      .logo("./image/logo.png", logoParams)
       .save(outputFile)
       .on("start", function (command) {
+        processingRequests[requestId] = { status: "processing", progress: 95 };
         console.log("ffmpeg process started:", command);
       })
       .on("error", function (err) {
@@ -474,6 +465,7 @@ const createVideo = async (
         reject(err);
       })
       .on("end", function (output) {
+        processingRequests[requestId] = { status: "processing", progress: 99 };
         console.log("Video created in:", output);
         resolve(outputFile);
       });
