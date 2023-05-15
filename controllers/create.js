@@ -127,11 +127,15 @@ exports.createMovie = async (req, res, next) => {
     );
     processingRequests[requestId] = { status: "processing", progress: 85 };
 
+    // Calculate the total duration for the logo
+    const totalDuration = durations.reduce((acc, val) => acc + val, 0);
+
     // Create the video
     const videoFile = await createVideo(
       prompt,
       imagePaths,
       durations,
+      totalDuration,
       narrator,
       mergedAudioFile,
       requestId
@@ -224,11 +228,11 @@ exports.getVideos = async (req, res, next) => {
 
 exports.getVideo = async (req, res, next) => {
   const { videoId } = req.query;
-  console.log(videoId);
+  console.log(videoId)
   try {
     const params = {
       TableName: "staryai",
-      Key: { videoId: videoId },
+      Key: { id: videoId },
     };
 
     const data = await dynamoDB.get(params).promise();
@@ -431,6 +435,7 @@ const createVideo = async (
   prompt,
   imagePaths,
   durations,
+  totalDuration,
   narrator,
   mergedAudioFile,
   requestId
@@ -449,12 +454,18 @@ const createVideo = async (
     delay: 0.1, // seconds
   };
 
+  var logoParams = {
+    start: 0.1,
+    end: totalDuration,
+  };
+
   const outputFile = `/tmp/${prompt}_${narrator.name}.mp4`;
 
   return new Promise((resolve, reject) => {
     // Create the final video
     videoshow(frames, videoOptions)
       .audio(mergedAudioFile, audioParams)
+      .logo("./image/logo.png", logoParams)
       .save(outputFile)
       .on("start", function (command) {
         processingRequests[requestId] = { status: "processing", progress: 95 };
@@ -465,7 +476,6 @@ const createVideo = async (
         reject(err);
       })
       .on("end", function (output) {
-        processingRequests[requestId] = { status: "processing", progress: 99 };
         console.log("Video created in:", output);
         resolve(outputFile);
       });
