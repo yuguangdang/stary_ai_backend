@@ -228,11 +228,10 @@ exports.getVideos = async (req, res, next) => {
 
 exports.getVideo = async (req, res, next) => {
   const { videoId } = req.query;
-  console.log(videoId)
   try {
     const params = {
       TableName: "staryai",
-      Key: { id: videoId },
+      Key: { videoId: videoId },
     };
 
     const data = await dynamoDB.get(params).promise();
